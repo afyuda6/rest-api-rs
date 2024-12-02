@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use sqlx::SqlitePool;
 use warp::{Filter, Rejection};
 use warp::reply::Json;
@@ -12,12 +13,15 @@ async fn main() {
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    let _pool = SqlitePool::connect(&database_url)
+    let pool = SqlitePool::connect(&database_url)
         .await
         .expect("Failed to connect to the database");
 
+    let pool = Arc::new(pool);
+
     let get_users_route = warp::path("users")
         .and(warp::get())
+        .and(with_pool(pool.clone()))
         .and_then(handle_read_users);
 
     let post_user_route = warp::path("users")
@@ -50,10 +54,15 @@ async fn main() {
         .await;
 }
 
+fn with_pool(pool: Arc<SqlitePool>) -> impl Filter<Extract = (Arc<SqlitePool>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || pool.clone())
+}
+
 async fn handle_not_found() -> Result<Json, Rejection> {
     let response = Response {
         status: "Not Found".to_string(),
         code: 404,
+        data: None,
     };
     Ok(warp::reply::json(&response))
 }
@@ -62,6 +71,7 @@ async fn handle_method_not_allowed(_method: warp::http::Method) -> Result<Json, 
     let response = Response {
         status: "Method Not Allowed".to_string(),
         code: 405,
+        data: None,
     };
     Ok(warp::reply::json(&response))
 }
