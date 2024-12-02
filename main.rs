@@ -1,11 +1,17 @@
-use std::sync::Arc;
 use sqlx::SqlitePool;
+use std::sync::Arc;
+use warp::http::StatusCode;
+use warp::reply::{with_status, Json};
 use warp::{Filter, Rejection};
-use warp::reply::Json;
+
+mod database;
+use database::sqlite::initialize_database;
 
 mod handlers;
-use handlers::user::{handle_create_user, handle_read_users, handle_update_user, handle_delete_user};
 use crate::handlers::user::Response;
+use handlers::user::{
+    handle_create_user, handle_delete_user, handle_read_users, handle_update_user,
+};
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +21,9 @@ async fn main() {
 
     let pool = SqlitePool::connect(&database_url)
         .await
-        .expect("Failed to connect to the database");
+        .expect("Failed to connect to SQLite database");
+
+    initialize_database(&pool).await;
 
     let pool = Arc::new(pool);
 
@@ -26,14 +34,20 @@ async fn main() {
 
     let post_user_route = warp::path("users")
         .and(warp::post())
+        .and(with_pool(pool.clone()))
+        .and(warp::body::form())
         .and_then(handle_create_user);
 
     let put_user_route = warp::path("users")
         .and(warp::put())
+        .and(with_pool(pool.clone()))
+        .and(warp::body::form())
         .and_then(handle_update_user);
 
     let delete_user_route = warp::path("users")
         .and(warp::delete())
+        .and(with_pool(pool.clone()))
+        .and(warp::body::form())
         .and_then(handle_delete_user);
 
     let users = get_users_route
@@ -49,29 +63,35 @@ async fn main() {
 
     let routes = users.or(method_not_allowed).or(not_found);
 
-    warp::serve(routes)
-        .run(([127, 0, 0, 1], 6007))
-        .await;
+    warp::serve(routes).run(([127, 0, 0, 1], 6007)).await;
 }
 
-fn with_pool(pool: Arc<SqlitePool>) -> impl Filter<Extract = (Arc<SqlitePool>,), Error = std::convert::Infallible> + Clone {
+fn with_pool(
+    pool: Arc<SqlitePool>,
+) -> impl Filter<Extract = (Arc<SqlitePool>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || pool.clone())
 }
 
-async fn handle_not_found() -> Result<Json, Rejection> {
+async fn handle_not_found() -> Result<warp::reply::WithStatus<Json>, Rejection> {
     let response = Response {
         status: "Not Found".to_string(),
         code: 404,
-        data: None,
     };
-    Ok(warp::reply::json(&response))
+    Ok(with_status(
+        warp::reply::json(&response),
+        StatusCode::NOT_FOUND,
+    ))
 }
 
-async fn handle_method_not_allowed(_method: warp::http::Method) -> Result<Json, Rejection> {
+async fn handle_method_not_allowed(
+    _method: warp::http::Method,
+) -> Result<warp::reply::WithStatus<Json>, Rejection> {
     let response = Response {
         status: "Method Not Allowed".to_string(),
         code: 405,
-        data: None,
     };
-    Ok(warp::reply::json(&response))
+    Ok(with_status(
+        warp::reply::json(&response),
+        StatusCode::METHOD_NOT_ALLOWED,
+    ))
 }
