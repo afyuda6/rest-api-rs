@@ -1,0 +1,6 @@
+**/mod.rs
+.idea
+target/
+.env
+Cargo.lock
+rest_api_rust.db
