@@ -13,7 +13,7 @@ pub async fn initialize_database(pool: &SqlitePool) {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY,
             name TEXT NOT NULL
         )
         "#,
