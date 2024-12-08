@@ -28,23 +28,27 @@ async fn main() {
     let pool = Arc::new(pool);
 
     let get_users_route = warp::path("users")
+        .and(warp::path::end())
         .and(warp::get())
         .and(with_pool(pool.clone()))
         .and_then(handle_read_users);
 
     let post_user_route = warp::path("users")
+        .and(warp::path::end())
         .and(warp::post())
         .and(with_pool(pool.clone()))
         .and(warp::body::form())
         .and_then(handle_create_user);
 
     let put_user_route = warp::path("users")
+        .and(warp::path::end())
         .and(warp::put())
         .and(with_pool(pool.clone()))
         .and(warp::body::form())
         .and_then(handle_update_user);
 
     let delete_user_route = warp::path("users")
+        .and(warp::path::end())
         .and(warp::delete())
         .and(with_pool(pool.clone()))
         .and(warp::body::form())
@@ -58,6 +62,7 @@ async fn main() {
     let not_found = warp::any().and_then(handle_not_found);
 
     let method_not_allowed = warp::path("users")
+        .and(warp::path::end())
         .and(warp::method())
         .and_then(handle_method_not_allowed);
 

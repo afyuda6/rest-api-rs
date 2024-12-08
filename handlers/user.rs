@@ -52,12 +52,12 @@ pub struct CreateUserRequest {
 #[derive(Deserialize)]
 pub struct UpdateUserRequest {
     pub name: Option<String>,
-    pub id: Option<i64>,
+    pub id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct DeleteUserRequest {
-    pub id: Option<i64>,
+    pub id: Option<String>,
 }
 
 pub async fn handle_read_users(
@@ -83,13 +83,16 @@ pub async fn handle_create_user(
 ) -> Result<warp::reply::WithStatus<Json>, Rejection> {
     let name = create_user_request.name;
 
-    if name.is_none() {
+    if name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
         let response = ResponseWithErrors {
             status: "Bad Request".to_string(),
             code: 400,
             errors: "Missing 'name' parameter".to_string(),
         };
-        return Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST))
+        return Ok(with_status(
+            warp::reply::json(&response),
+            StatusCode::BAD_REQUEST,
+        ));
     }
 
     match sqlx::query("INSERT INTO users (name) VALUES (?)")
@@ -102,14 +105,20 @@ pub async fn handle_create_user(
                 status: "Created".to_string(),
                 code: 201,
             };
-            Ok(with_status(warp::reply::json(&response), StatusCode::CREATED))
+            Ok(with_status(
+                warp::reply::json(&response),
+                StatusCode::CREATED,
+            ))
         }
         Err(_err) => {
             let response = Response {
                 status: "Bad Request".to_string(),
                 code: 400,
             };
-            Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST))
+            Ok(with_status(
+                warp::reply::json(&response),
+                StatusCode::BAD_REQUEST,
+            ))
         }
     }
 }
@@ -121,13 +130,18 @@ pub async fn handle_update_user(
     let id = update_user_request.id;
     let name = update_user_request.name;
 
-    if id.is_none() || name.is_none() {
+    if id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
+        || name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
+    {
         let response = ResponseWithErrors {
             status: "Bad Request".to_string(),
             code: 400,
             errors: "Missing 'id' or 'name' parameter".to_string(),
         };
-        return Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST));
+        return Ok(with_status(
+            warp::reply::json(&response),
+            StatusCode::BAD_REQUEST,
+        ));
     }
 
     match sqlx::query("UPDATE users SET name = ? WHERE id = ?")
@@ -148,7 +162,10 @@ pub async fn handle_update_user(
                 status: "Bad Request".to_string(),
                 code: 400,
             };
-            Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST))
+            Ok(with_status(
+                warp::reply::json(&response),
+                StatusCode::BAD_REQUEST,
+            ))
         }
     }
 }
@@ -159,13 +176,16 @@ pub async fn handle_delete_user(
 ) -> Result<warp::reply::WithStatus<Json>, Rejection> {
     let id = delete_user_request.id;
 
-    if id.is_none() {
+    if id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
         let response = ResponseWithErrors {
             status: "Bad Request".to_string(),
             code: 400,
             errors: "Missing 'id' parameter".to_string(),
         };
-        return Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST));
+        return Ok(with_status(
+            warp::reply::json(&response),
+            StatusCode::BAD_REQUEST,
+        ));
     }
 
     match sqlx::query("DELETE FROM users WHERE id = ?")
@@ -185,7 +205,10 @@ pub async fn handle_delete_user(
                 status: "Bad Request".to_string(),
                 code: 400,
             };
-            Ok(with_status(warp::reply::json(&response), StatusCode::BAD_REQUEST))
+            Ok(with_status(
+                warp::reply::json(&response),
+                StatusCode::BAD_REQUEST,
+            ))
         }
     }
 }
