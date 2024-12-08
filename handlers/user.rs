@@ -20,8 +20,8 @@ impl FromRow<'_, SqliteRow> for User {
 
 #[derive(Serialize)]
 pub struct User {
-    pub name: String,
     pub id: i64,
+    pub name: String,
 }
 
 #[derive(Serialize)]
