@@ -1,22 +1,6 @@
-use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqliteRow;
-use sqlx::FromRow;
-use sqlx::{Row, SqlitePool};
-use std::sync::Arc;
-use warp::http::StatusCode;
-use warp::{
-    reply::{with_status, Json},
-    Rejection,
-};
-
-impl FromRow<'_, SqliteRow> for User {
-    fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
-        Ok(User {
-            id: row.try_get("id")?,
-            name: row.try_get("name")?,
-        })
-    }
-}
+use serde::{Serialize};
+use sqlx::{query, query_as, SqlitePool};
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize)]
 pub struct User {
@@ -44,29 +28,12 @@ pub struct ResponseWithErrors {
     pub errors: String,
 }
 
-#[derive(Deserialize)]
-pub struct CreateUserRequest {
-    pub name: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateUserRequest {
-    pub name: Option<String>,
-    pub id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct DeleteUserRequest {
-    pub id: Option<String>,
-}
-
-pub async fn handle_read_users(
-    pool: Arc<SqlitePool>,
-) -> Result<warp::reply::WithStatus<Json>, Rejection> {
-    let users: Vec<User> = sqlx::query_as::<_, User>("SELECT id, name FROM users")
-        .fetch_all(&*pool)
-        .await
-        .map_err(|_e| warp::reject::not_found())?;
+pub fn handle_read_users(pool: Arc<Mutex<SqlitePool>>) -> String {
+    let pool = pool.lock().unwrap();
+    let users: Vec<User> = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(query_as!(User, "SELECT id, name FROM users").fetch_all(&*pool))
+        .unwrap_or_default();
 
     let response = ResponseWithData {
         status: "OK".to_string(),
@@ -74,141 +41,122 @@ pub async fn handle_read_users(
         data: users,
     };
 
-    Ok(with_status(warp::reply::json(&response), StatusCode::OK))
+    let body = serde_json::to_string(&response).unwrap_or_default();
+
+    http_response(200, "OK", &body)
 }
 
-pub async fn handle_create_user(
-    pool: Arc<SqlitePool>,
-    create_user_request: CreateUserRequest,
-) -> Result<warp::reply::WithStatus<Json>, Rejection> {
-    let name = create_user_request.name;
-
-    if name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-        let response = ResponseWithErrors {
-            status: "Bad Request".to_string(),
-            code: 400,
-            errors: "Missing 'name' parameter".to_string(),
-        };
-        return Ok(with_status(
-            warp::reply::json(&response),
-            StatusCode::BAD_REQUEST,
-        ));
+pub fn handle_create_user(request: &[&str], pool: Arc<Mutex<SqlitePool>>) -> String {
+    let body = extract_body(request);
+    if body.is_empty() {
+        return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'name' parameter\"}");
     }
 
-    match sqlx::query("INSERT INTO users (name) VALUES (?)")
-        .bind(&name)
-        .execute(&*pool)
-        .await
-    {
-        Ok(_) => {
-            let response = Response {
-                status: "Created".to_string(),
-                code: 201,
-            };
-            Ok(with_status(
-                warp::reply::json(&response),
-                StatusCode::CREATED,
-            ))
+    let form_data: Vec<(String, String)> = form_urlencoded::parse(body.as_bytes())
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+
+    let name = form_data.iter().find(|(key, _)| key == "name").map(|(_, value)| value.clone());
+
+    if let Some(name) = name {
+        if name.trim().is_empty() {
+            return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'name' parameter\"}");
         }
-        Err(_err) => {
-            let response = Response {
-                status: "Bad Request".to_string(),
-                code: 400,
-            };
-            Ok(with_status(
-                warp::reply::json(&response),
-                StatusCode::BAD_REQUEST,
-            ))
+
+        let pool = pool.lock().unwrap();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(
+            query("INSERT INTO users (name) VALUES (?)")
+                .bind(&name)
+                .execute(&*pool),
+        );
+
+        match result {
+            Ok(_) => http_response(201, "Created", "{\"status\": \"Created\", \"code\": 201}"),
+            _ => http_response(0, "", "")
         }
+    } else {
+        http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\":\"Missing 'name' parameter\"}")
     }
 }
 
-pub async fn handle_update_user(
-    pool: Arc<SqlitePool>,
-    update_user_request: UpdateUserRequest,
-) -> Result<warp::reply::WithStatus<Json>, Rejection> {
-    let id = update_user_request.id;
-    let name = update_user_request.name;
-
-    if id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
-        || name.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
-    {
-        let response = ResponseWithErrors {
-            status: "Bad Request".to_string(),
-            code: 400,
-            errors: "Missing 'id' or 'name' parameter".to_string(),
-        };
-        return Ok(with_status(
-            warp::reply::json(&response),
-            StatusCode::BAD_REQUEST,
-        ));
+pub fn handle_update_user(request: &[&str], pool: Arc<Mutex<SqlitePool>>) -> String {
+    let body = extract_body(request);
+    if body.is_empty() {
+        return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'id' or 'name' parameter\"}");
     }
 
-    match sqlx::query("UPDATE users SET name = ? WHERE id = ?")
-        .bind(&name)
-        .bind(&id)
-        .execute(&*pool)
-        .await
-    {
-        Ok(_) => {
-            let response = Response {
-                status: "OK".to_string(),
-                code: 200,
-            };
-            Ok(with_status(warp::reply::json(&response), StatusCode::OK))
+    let form_data: Vec<(String, String)> = form_urlencoded::parse(body.as_bytes())
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+
+    let name = form_data.iter().find(|(key, _)| key == "name").map(|(_, value)| value.clone());
+    let id = form_data.iter().find(|(key, _)| key == "id").map(|(_, value)| value.clone());
+
+    if let (Some(name), Some(id)) = (name, id) {
+        if name.trim().is_empty() || id.trim().is_empty() {
+            return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'id' or 'name' parameter\"}");
         }
-        Err(_err) => {
-            let response = Response {
-                status: "Bad Request".to_string(),
-                code: 400,
-            };
-            Ok(with_status(
-                warp::reply::json(&response),
-                StatusCode::BAD_REQUEST,
-            ))
+
+        let pool = pool.lock().unwrap();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(
+            query("UPDATE users SET name = ? WHERE id = ?")
+                .bind(&name)
+                .bind(&id)
+                .execute(&*pool),
+        );
+
+        match result {
+            Ok(_) => http_response(200, "OK", "{\"status\": \"OK\", \"code\": 200}"),
+            _ => http_response(0, "", "")
         }
+    } else {
+        http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\":\"Missing 'id' or 'name' parameter\"}")
     }
 }
 
-pub async fn handle_delete_user(
-    pool: Arc<SqlitePool>,
-    delete_user_request: DeleteUserRequest,
-) -> Result<warp::reply::WithStatus<Json>, Rejection> {
-    let id = delete_user_request.id;
-
-    if id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-        let response = ResponseWithErrors {
-            status: "Bad Request".to_string(),
-            code: 400,
-            errors: "Missing 'id' parameter".to_string(),
-        };
-        return Ok(with_status(
-            warp::reply::json(&response),
-            StatusCode::BAD_REQUEST,
-        ));
+pub fn handle_delete_user(request: &[&str], pool: Arc<Mutex<SqlitePool>>) -> String {
+    let body = extract_body(request);
+    if body.is_empty() {
+        return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'id' parameter\"}");
     }
 
-    match sqlx::query("DELETE FROM users WHERE id = ?")
-        .bind(&id)
-        .execute(&*pool)
-        .await
-    {
-        Ok(_) => {
-            let response = Response {
-                status: "OK".to_string(),
-                code: 200,
-            };
-            Ok(with_status(warp::reply::json(&response), StatusCode::OK))
+    let form_data: Vec<(String, String)> = form_urlencoded::parse(body.as_bytes())
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+
+    let id = form_data.iter().find(|(key, _)| key == "id").map(|(_, value)| value.clone());
+
+    if let Some(id) = id {
+        if id.trim().is_empty() {
+            return http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\": \"Missing 'id' parameter\"}");
         }
-        Err(_err) => {
-            let response = Response {
-                status: "Bad Request".to_string(),
-                code: 400,
-            };
-            Ok(with_status(
-                warp::reply::json(&response),
-                StatusCode::BAD_REQUEST,
-            ))
+
+        let pool = pool.lock().unwrap();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(
+            query("DELETE FROM users WHERE id = ?")
+                .bind(&id)
+                .execute(&*pool),
+        );
+
+        match result {
+            Ok(_) => http_response(200, "OK", "{\"status\": \"OK\", \"code\": 200}"),
+            _ => http_response(0, "", "")
         }
+    } else {
+        http_response(400, "Bad Request", "{\"status\": \"Bad Request\", \"code\": 400, \"errors\":\"Missing 'id' parameter\"}")
     }
+}
+
+fn extract_body(request: &[&str]) -> String {
+    request.iter().rev().find(|&&line| line.is_empty()).map(|_| request.last().unwrap_or(&"").to_string()).unwrap_or_default()
+}
+
+fn http_response(status_code: u16, status: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        status_code,
+        status,
+        body.len(),
+        body
+    )
 }
