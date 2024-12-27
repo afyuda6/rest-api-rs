@@ -152,7 +152,7 @@ fn http_response(status_code: u16, status: &str, body: &str) -> String {
 }
 
 pub(crate) fn handle_request(mut stream: TcpStream, pool: Arc<Mutex<SqlitePool>>) {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 8192];
     if let Ok(size) = stream.read(&mut buffer) {
         let request = String::from_utf8_lossy(&buffer[..size]);
         let lines: Vec<&str> = request.lines().collect();
