@@ -1,4 +1,4 @@
-use serde::{Serialize};
+use serde::Serialize;
 use sqlx::{query, query_as, SqlitePool};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -137,7 +137,13 @@ fn extract_body(request: &[&str]) -> String {
 
 fn http_response(status_code: u16, status: &str, body: &str) -> String {
     format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n\
+        Access-Control-Allow-Origin: *\r\n\
+        Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
+        Access-Control-Allow-Headers: Content-Type\r\n\
+        Content-Type: application/json\r\n\
+        Content-Length: {}\r\n\r\n\
+        {}",
         status_code,
         status,
         body.len(),
@@ -158,6 +164,15 @@ pub(crate) fn handle_request(mut stream: TcpStream, pool: Arc<Mutex<SqlitePool>>
             ("POST", "/users") | ("POST", "/users/") => handle_create_user(&lines, pool),
             ("PUT", "/users") | ("PUT", "/users/") => handle_update_user(&lines, pool),
             ("DELETE", "/users") | ("DELETE", "/users/") => handle_delete_user(&lines, pool),
+            ("OPTIONS", "/users") | ("OPTIONS", "/users/") => {
+                format!(
+                    "HTTP/1.1 200 OK\r\n\
+                     Access-Control-Allow-Origin: *\r\n\
+                     Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
+                     Access-Control-Allow-Headers: Content-Type\r\n\
+                     Content-Type: application/json\r\n\r\n"
+                )
+            }
             (_, "/users") | (_, "/users/") => {
                 http_response(405, "Method Not Allowed", "{\"status\": \"Method Not Allowed\", \"code\": 405}")
             }
