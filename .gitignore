@@ -3,4 +3,5 @@
 target/
 .env
 Cargo.lock
+Cargo.toml
 rest_api_rs.db
